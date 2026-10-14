@@ -88,8 +88,6 @@ OUTPUT FORMAT:
   }
 ]`;
 
-const NARRATION_WORDS_PER_MINUTE = 140;
-
 // ─── HELPER FOR ROBUST JSON EXTRACTION ────────────────────────────────────────
 function cleanAndParseJSON(rawText) {
   if (!rawText || typeof rawText !== "string") {
@@ -196,25 +194,6 @@ function cleanAndParseJSON(rawText) {
 
   // If all automated repairs failed, throw with actionable message
   throw new Error("Unable to parse AI story analysis. The AI returned an unparseable response.");
-}
-
-function formatNarrationDuration(wordCount) {
-  if (!wordCount) return "0 sec";
-
-  const totalSeconds = Math.ceil((wordCount / NARRATION_WORDS_PER_MINUTE) * 60);
-  if (totalSeconds < 60) return `${totalSeconds} sec`;
-
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    if (minutes > 0) return `${hours} hr ${minutes} min`;
-    return `${hours} hr`;
-  }
-
-  if (seconds > 0) return `${minutes} min ${seconds} sec`;
-  return `${minutes} min`;
 }
 
 // ─── FUZZY SPEAKER DEDUPLICATION ──────────────────────────────────────────────
@@ -1708,9 +1687,6 @@ export default function NarrateAI() {
 
   const hasStory = parsedLines.length > 0;
   const canAnalyze = !!apiKey.trim() && !!storyText.trim() && !isLoading;
-  const storyWordCount = storyText.trim() ? storyText.trim().split(/\s+/).filter(Boolean).length : 0;
-  const storyCharacterCount = storyText.length;
-  const estimatedNarrationDuration = formatNarrationDuration(storyWordCount);
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
@@ -1807,7 +1783,7 @@ export default function NarrateAI() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                   <label style={{ ...S.label, marginBottom: 0 }}>Your Story</label>
                   <span style={{ fontSize: "11px", color: "#64748b" }}>
-                    {`${storyWordCount} words · ${storyCharacterCount} characters · est. ${estimatedNarrationDuration}`}
+                    {storyText ? `${storyText.trim().split(/\s+/).filter(Boolean).length} words · est. ${Math.ceil(storyText.trim().split(/\s+/).filter(Boolean).length / 150)} min narration` : "0 words"}
                   </span>
                 </div>
                 <textarea
