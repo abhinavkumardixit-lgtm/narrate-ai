@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const EMOTION_PARAMS = {
@@ -144,7 +144,7 @@ function cleanAndParseJSON(rawText) {
   cleaned = cleaned.replace(/\]\s*(?=\[)/g, "],");
 
   // 6. Strip invalid trailing commas before closing braces/brackets
-  cleaned = cleaned.replace(/,\s*([\]\}])/g, "$1");
+  cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
 
   // 7. Auto-repair truncated output (e.g., token limit cutoff)
   if (rootType === "array") {
@@ -180,7 +180,7 @@ function cleanAndParseJSON(rawText) {
     }
   } catch {
     // 9. Aggressive object-by-object salvage as ultimate safety net
-    const objectRegex = /\{[\s\S]*?\}(?=\s*[,\]\}]|\s*\{|\s*$)/g;
+    const objectRegex = /\{[\s\S]*?\}(?=\s*[,\]}]|\s*\{|\s*$)/g;
     const matches = cleaned.match(objectRegex);
     if (matches && matches.length > 0) {
       const recovered = [];
@@ -314,7 +314,7 @@ async function callGroqWithModel(apiKey, storyText, model, retryPromptSuffix = "
   } catch (err) {
     clearTimeout(timeoutId);
     if (err.name === "AbortError") {
-      throw new Error(`Timeout after 35 seconds for model ${model}.`);
+      throw new Error(`Timeout after 35 seconds for model ${model}.`, { cause: err });
     }
     throw err;
   }
@@ -1275,69 +1275,93 @@ function PlaybackControls({ isPlaying, currentIndex, total, onPlay, onPause, onS
   );
 }
 
+function getInitialNarrateAIState() {
+  if (typeof window === "undefined") {
+    return {
+      apiKey: "",
+      storyText: "",
+      parsedLines: [],
+      characters: [],
+      colorMap: {},
+      voiceAssignments: {},
+      history: [],
+      view: "input",
+    };
+  }
+  try {
+    const savedApiKey = localStorage.getItem("narrateai_groq_key") || "";
+    const savedStory = localStorage.getItem("narrateai_story_text") || "";
+    const savedParsedLines = JSON.parse(localStorage.getItem("narrateai_parsed_lines") || "[]");
+    const savedCharacters = JSON.parse(localStorage.getItem("narrateai_characters") || "[]");
+    const savedColorMap = JSON.parse(localStorage.getItem("narrateai_color_map") || "{}");
+    const savedVoiceAssignments = JSON.parse(localStorage.getItem("narrateai_voice_assignments") || "{}");
+    const savedView = localStorage.getItem("narrateai_view") || "";
+    const savedHistory = JSON.parse(localStorage.getItem("narrateai_history") || "[]");
+
+    const parsedLines = Array.isArray(savedParsedLines) ? savedParsedLines : [];
+    const characters = Array.isArray(savedCharacters) && savedCharacters.length > 0
+      ? savedCharacters
+      : Object.entries((parsedLines || []).reduce((acc, line) => {
+          if (line && line.speaker && !acc[line.speaker]) {
+            acc[line.speaker] = line.persona || "";
+          }
+          return acc;
+        }, {})).map(([speaker, persona]) => ({ speaker, persona }));
+
+    return {
+      apiKey: savedApiKey,
+      storyText: savedStory,
+      parsedLines,
+      characters,
+      colorMap: typeof savedColorMap === "object" && savedColorMap ? savedColorMap : {},
+      voiceAssignments: typeof savedVoiceAssignments === "object" && savedVoiceAssignments ? savedVoiceAssignments : {},
+      history: Array.isArray(savedHistory) ? savedHistory : [],
+      view: savedView || (parsedLines.length > 0 ? "story" : "input"),
+    };
+  } catch (err) {
+    console.warn("Failed to restore NarrateAI state from localStorage", err);
+    return {
+      apiKey: "",
+      storyText: "",
+      parsedLines: [],
+      characters: [],
+      colorMap: {},
+      voiceAssignments: {},
+      history: [],
+      view: "input",
+    };
+  }
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function NarrateAI() {
-  const [apiKey, setApiKey]                     = useState("");
-  const [storyText, setStoryText]               = useState("");
-  const [parsedLines, setParsedLines]           = useState([]);
-  const [characters, setCharacters]             = useState([]);
-  const [colorMap, setColorMap]                 = useState({});
-  const [voiceAssignments, setVoiceAssignments] = useState({});
+  const [initialState]                          = useState(getInitialNarrateAIState);
+  const [apiKey, setApiKey]                     = useState(initialState.apiKey);
+  const [storyText, setStoryText]               = useState(initialState.storyText);
+  const [parsedLines, setParsedLines]           = useState(initialState.parsedLines);
+  const [characters, setCharacters]             = useState(initialState.characters);
+  const [colorMap, setColorMap]                 = useState(initialState.colorMap);
+  const [voiceAssignments, setVoiceAssignments] = useState(initialState.voiceAssignments);
   const [availableVoices, setAvailableVoices]   = useState([]);
   const [isLoading, setIsLoading]               = useState(false);
   const [isPlaying, setIsPlaying]               = useState(false);
   const [currentIndex, setCurrentIndex]         = useState(0);
   const [error, setError]                       = useState("");
   const [speed, setSpeed]                       = useState(1.0);
-  const [view, setView]                         = useState("input");
+  const [view, setView]                         = useState(initialState.view);
   const [speechSupported]                       = useState(() => typeof window !== "undefined" && "speechSynthesis" in window && !!window.speechSynthesis);
   const [showFinished, setShowFinished]         = useState(false);
   const [loadingStep, setLoadingStep]           = useState("");
   const [chunkProgress, setChunkProgress]       = useState(null);
   
-  const [history, setHistory]                   = useState([]);
+  const [history, setHistory]                   = useState(initialState.history);
   const [showWritingPanel, setShowWritingPanel] = useState(true);
   const [showPlaybackPanel, setShowPlaybackPanel] = useState(true);
-  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen]             = useState(false);
 
   const helpButtonRef = useRef(null);
   const helpDialogRef = useRef(null);
   const previousFocusRef = useRef(null);
-  
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const savedApiKey = localStorage.getItem("narrateai_groq_key") || "";
-      const savedStory = localStorage.getItem("narrateai_story_text") || "";
-      const savedParsedLines = JSON.parse(localStorage.getItem("narrateai_parsed_lines") || "[]");
-      const savedCharacters = JSON.parse(localStorage.getItem("narrateai_characters") || "[]");
-      const savedColorMap = JSON.parse(localStorage.getItem("narrateai_color_map") || "{}");
-      const savedVoiceAssignments = JSON.parse(localStorage.getItem("narrateai_voice_assignments") || "{}");
-      const savedView = localStorage.getItem("narrateai_view") || "";
-      const savedHistory = JSON.parse(localStorage.getItem("narrateai_history") || "[]");
-
-      const parsedLines = Array.isArray(savedParsedLines) ? savedParsedLines : [];
-      const characters = Array.isArray(savedCharacters) && savedCharacters.length > 0
-        ? savedCharacters
-        : Object.entries((parsedLines || []).reduce((acc, line) => {
-            if (line && line.speaker && !acc[line.speaker]) {
-              acc[line.speaker] = line.persona || "";
-            }
-            return acc;
-          }, {})).map(([speaker, persona]) => ({ speaker, persona }));
-
-      setApiKey(savedApiKey);
-      setStoryText(savedStory);
-      setParsedLines(parsedLines);
-      setCharacters(characters);
-      setColorMap(typeof savedColorMap === "object" && savedColorMap ? savedColorMap : {});
-      setVoiceAssignments(typeof savedVoiceAssignments === "object" && savedVoiceAssignments ? savedVoiceAssignments : {});
-      setHistory(Array.isArray(savedHistory) ? savedHistory : []);
-      setView(savedView || (parsedLines.length > 0 ? "story" : "input"));
-    } catch (err) {
-      console.warn("Failed to restore NarrateAI state from localStorage", err);
-    }
-  }, []);
 
   const synthRef            = useRef(typeof window !== "undefined" ? window.speechSynthesis : null);
   const watchdogIntervalRef = useRef(null);
@@ -1402,16 +1426,38 @@ export default function NarrateAI() {
     localStorage.setItem("narrateai_voice_assignments", JSON.stringify(item.voiceAssignments));
   }
 
+  const resolvedVoiceAssignments = useMemo(() => {
+    if (availableVoices.length === 0 || Object.keys(voiceAssignments).length === 0) return voiceAssignments;
+    const safePool = availableVoices.filter(v => !isProblematicVoice(v));
+    const pool = safePool.length > 0 ? safePool : availableVoices;
+    const resolved = {};
+
+    for (const [speaker, voiceData] of Object.entries(voiceAssignments)) {
+      const actualVoice = resolveSpeechVoice(voiceData, pool);
+      if (actualVoice && !isProblematicVoice(actualVoice)) {
+        resolved[speaker] = actualVoice;
+      } else if (pool.length > 0) {
+        resolved[speaker] = pool[0];
+      } else {
+        resolved[speaker] = voiceData;
+      }
+    }
+    return resolved;
+  }, [availableVoices, voiceAssignments]);
+
   useEffect(() => { speedRef.current = speed; }, [speed]);
-  useEffect(() => { voiceRef.current = voiceAssignments; }, [voiceAssignments]);
+  useEffect(() => { voiceRef.current = resolvedVoiceAssignments; }, [resolvedVoiceAssignments]);
   useEffect(() => { linesRef.current = parsedLines; }, [parsedLines]);
 
   useEffect(() => {
+    const synth = synthRef.current;
     return () => {
-      if (synthRef.current) synthRef.current.cancel();
+      if (synth) synth.cancel();
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     };
   }, []);
+
+  const actionsRef = useRef({});
 
   const openShortcutsHelp = useCallback(() => {
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1505,67 +1551,41 @@ export default function NarrateAI() {
       if (e.code === "Space") {
         e.preventDefault();
         if (playingRef.current) {
-          pausePlayback();
+          actionsRef.current.pausePlayback?.();
         } else {
-          handlePlay();
+          actionsRef.current.handlePlay?.();
         }
       } else if (e.key.toLowerCase() === "r") {
         e.preventDefault();
-        stopPlayback();
+        actionsRef.current.stopPlayback?.();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        skipForward();
+        actionsRef.current.skipForward?.();
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        skipBackward();
+        actionsRef.current.skipBackward?.();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isHelpOpen, currentIndex, parsedLines, closeShortcutsHelp, openShortcutsHelp]);
+  }, [isHelpOpen, closeShortcutsHelp, openShortcutsHelp]);
 
   // Load browser voices
   useEffect(() => {
     if (!speechSupported) return;
+    const synth = synthRef.current;
+    if (!synth) return;
     function loadVoices() {
-      if (!synthRef.current) return;
-      const voices = synthRef.current.getVoices();
+      const voices = synth.getVoices();
       if (voices.length > 0) setAvailableVoices(voices);
     }
     loadVoices();
-    if (synthRef.current) {
-      synthRef.current.onvoiceschanged = loadVoices;
-    }
+    synth.onvoiceschanged = loadVoices;
     return () => {
-      if (synthRef.current) synthRef.current.onvoiceschanged = null;
+      synth.onvoiceschanged = null;
     };
   }, [speechSupported]);
-
-  useEffect(() => {
-    if (availableVoices.length === 0 || Object.keys(voiceAssignments).length === 0) return;
-    const safePool = availableVoices.filter(v => !isProblematicVoice(v));
-    const pool = safePool.length > 0 ? safePool : availableVoices;
-    const resolved = {};
-    let changed = false;
-
-    for (const [speaker, voiceData] of Object.entries(voiceAssignments)) {
-      const actualVoice = resolveSpeechVoice(voiceData, pool);
-      if (actualVoice && !isProblematicVoice(actualVoice)) {
-        resolved[speaker] = actualVoice;
-        if (actualVoice !== voiceData) {
-          changed = true;
-        }
-      } else if (pool.length > 0) {
-        resolved[speaker] = pool[0];
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      setVoiceAssignments(resolved);
-    }
-  }, [availableVoices, voiceAssignments]);
 
   // ── ANALYSE WITH GROQ ──
   async function analyzeStory() {
@@ -1654,7 +1674,7 @@ export default function NarrateAI() {
   }
 
   // ── PLAYBACK ENGINE ──
-  const playLine = useCallback((index) => {
+  function playLine(index) {
     const lines = linesRef.current;
     const voices = voiceRef.current;
     const generation = generationRef.current;
@@ -1718,7 +1738,7 @@ export default function NarrateAI() {
     };
 
     synthRef.current.speak(utt);
-  }, []);
+  }
 
   function startPlayback(fromIndex = 0) {
     if (!synthRef.current) return;
@@ -1799,6 +1819,10 @@ export default function NarrateAI() {
       setTimeout(() => startPlayback(idx), 50);
     }
   }
+
+  useEffect(() => {
+    actionsRef.current = { handlePlay, pausePlayback, stopPlayback, skipForward, skipBackward };
+  });
 
   const hasStory = parsedLines.length > 0;
   const canAnalyze = !!apiKey.trim() && !!storyText.trim() && !isLoading;
@@ -2029,7 +2053,7 @@ export default function NarrateAI() {
                   <CharacterPanel
                     characters={characters}
                     colorMap={colorMap}
-                    voiceAssignments={voiceAssignments}
+                    voiceAssignments={resolvedVoiceAssignments}
                   />
                   
                   <div style={{
