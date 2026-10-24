@@ -260,7 +260,7 @@ function deduplicateSpeakers(parsedLines) {
 
 // ─── INDIVIDUAL GROQ ATTEMPT ──────────────────────────────────────────────────
 async function callGroqWithModel(apiKey, storyText, model, retryPromptSuffix = "", maxTokens = 4096) {
-  const url = "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)";
+  const url = "https://api.groq.com/openai/v1/chat/completions";
 
   const userContent = retryPromptSuffix 
     ? `Analyze this story:\n\n${storyText}\n\n${retryPromptSuffix}`
@@ -323,7 +323,7 @@ async function callGroqWithModel(apiKey, storyText, model, retryPromptSuffix = "
 // ─── DYNAMIC GROQ MODEL DISCOVERY ─────────────────────────────────────────────
 async function fetchActiveGroqModels(apiKey) {
   try {
-    const res = await fetch("[https://api.groq.com/openai/v1/models](https://api.groq.com/openai/v1/models)", {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { "Authorization": `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;
@@ -832,9 +832,9 @@ function ApiKeyPanel({ apiKey, onKeyChange }) {
       {!apiKey && (
         <div style={{ fontSize: "12px", color: "#64748b", marginTop: "8px", lineHeight: 1.6 }}>
           Get a free API key →{" "}
-          <a href="[https://console.groq.com/keys](https://console.groq.com/keys)" target="_blank" rel="noreferrer"
+          <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer"
             style={{ color: "#6366f1", textDecoration: "none", fontWeight: 600 }}>
-            [console.groq.com/keys](https://console.groq.com/keys)
+            console.groq.com/keys
           </a>
           {" "}— no credit card needed. Very generous free limits.
         </div>
@@ -902,7 +902,7 @@ function VoiceQualityBanner({ availableVoices }) {
           Edge is free and already on your Windows PC.
         </div>
         <a
-          href="microsoft-edge:[https://narrate-ai-gamma.vercel.app/](https://narrate-ai-gamma.vercel.app/)"
+          href="microsoft-edge:https://narrate-ai-gamma.vercel.app/"
           style={{
             display: "inline-block", marginTop: "8px",
             padding: "6px 14px", borderRadius: "8px",
@@ -1663,7 +1663,7 @@ export default function NarrateAI() {
     } catch (err) {
       console.error(err);
       if (err.message?.includes("Invalid API Key") || err.message?.includes("401") || err.message?.includes("invalid_api_key")) {
-        setError("Invalid API key. Please double-check your Groq API key at [console.groq.com/keys](https://console.groq.com/keys)");
+        setError("Invalid API key. Please double-check your Groq API key at console.groq.com/keys");
       } else {
         setError(`Analysis failed: ${err.message || "Please check your story and try again."}`);
       }
